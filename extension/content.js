@@ -1193,17 +1193,28 @@ function schedulePaintActiveRows() {
   if (activeRowsRaf) return;
   activeRowsRaf = requestAnimationFrame(() => {
     activeRowsRaf = 0;
-    paintActiveRows();
-    paintTabStrips();
+    // We disconnect the observer while painting, otherwise the paints would
+    // mutate the watched subtree, schedule the next repaint, and loop endlessly.
+    // disconnect() also empties the queue, so a flag would not be enough.
+    activeRowsObserver.disconnect();
+    try {
+      paintActiveRows();
+      paintTabStrips();
+    } finally {
+      observeActiveRows();
+    }
   });
 }
 const activeRowsObserver = new MutationObserver(schedulePaintActiveRows);
-activeRowsObserver.observe(document.body || document.documentElement, {
-  subtree: true,
-  attributes: true,
-  attributeFilter: ["class", "aria-selected", "aria-current", "style"],
-  childList: true,
-});
+function observeActiveRows() {
+  activeRowsObserver.observe(document.body || document.documentElement, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "aria-selected", "aria-current", "style"],
+    childList: true,
+  });
+}
+observeActiveRows();
 
 // (The initial theme fetch is done by the engine in omarchy-runtime.js.)
 
