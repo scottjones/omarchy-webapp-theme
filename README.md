@@ -7,7 +7,8 @@ Light/Dark mode whenever you switch omarchy themes, so they visually blend into
 the rest of your desktop.
 
 Built and tested on Brave on Arch Linux + Omarchy. Works on Brave Origin,
-Chrome, Chromium, and Edge.
+Chrome, Chromium, Edge, and Helium (helium-browser-bin) — the fork Omarchy's
+web apps use by default.
 
 > Known as `omarchy-slack-theme` through 0.2.x, back when Slack was the only
 > pack.
@@ -76,7 +77,7 @@ background — robust to themes that don't use the obvious day/night naming
 
 ## Requirements
 
-- Brave, Brave Origin, Chrome, Chromium, or Edge — Manifest V3
+- Brave, Brave Origin, Chrome, Chromium, Edge, or Helium — Manifest V3
 - Bash + coreutils. No Python, no runtime dependencies.
 - Linux + [Omarchy](https://omarchy.org/) **4+** — the host reads
   `~/.local/state/omarchy/current/` and is driven by the `theme-set.d` hook.
