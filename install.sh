@@ -106,6 +106,9 @@ BROWSER_PROFILE_DIRS=(
   "$HOME/.config/BraveSoftware/Brave-Origin-Nightly"
   "$HOME/.config/microsoft-edge"
   "$HOME/.config/microsoft-edge-dev"
+  # Helium stores its profile under the Chromium product name net.imput.helium,
+  # not the browser name; the flags conf keeps the browser name (see below).
+  "$HOME/.config/net.imput.helium"
 )
 
 # Arch's browser launchers read ~/.config/<name>-flags.conf. The conf name doesn't
@@ -116,6 +119,10 @@ BROWSER_PROFILE_DIRS=(
 # Detect by BINARY, not profile dir: omarchy's own chromium-extension installers
 # mkdir every Chromium profile dir on every machine, so "the dir exists" would be
 # true for browsers you've never installed and we'd litter confs for all of them.
+#
+# Helium (helium-browser-bin) is a Chromium fork wrapped by /usr/bin/helium-browser,
+# whose wrapper reads ~/.config/helium-browser-flags.conf and execs the fork —
+# so the conf name here is helium-browser while its profile dir is net.imput.helium.
 FLAGS_TARGETS=(
   "chromium:chromium"
   "chrome:google-chrome-stable google-chrome"
@@ -127,6 +134,7 @@ FLAGS_TARGETS=(
   "brave-origin-beta:brave-origin-beta"
   "brave-origin-nightly:brave-origin-nightly"
   "microsoft-edge-stable:microsoft-edge-stable microsoft-edge"
+  "helium-browser:helium-browser"
 )
 
 browser_installed() {
