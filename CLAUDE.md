@@ -535,6 +535,19 @@ colour there can be traced to a token and fixed by redefining that token on an
 ancestor. The screenshot is still the input: sample the wrong pixel with
 `magick ... txt:` and match it against the token literals.
 
+**But the signed-out CSS is a different build from the logged-in app's**, so
+treat it as a lead, never as the final word on what paints. The logged-in client
+loads `client-boot-styles.*.css`, and at least some rules there differ from their
+`modern.vendor` twins. Measured 2026-09-25: signed-out
+`.searchFilterSingleSelectButton__jvy8J:hover` is the literal `background:#ddd`,
+while the logged-in rule is `rgba(var(--sk_foreground_low_solid,221, 221, 221), 1)`
+— a token the pack already themes, with `#ddd` only as its *fallback*. A review
+done from the curl'd bundle alone (a static reviewer can't log in) will report
+"literal, needs an `!important` override" for rules the live app has already
+tokenized. Before acting on such a finding, confirm it in the live CSSOM (the
+`sheet.href` of the matching rule tells you which bundle it came from), or by
+measuring the computed colour on an element carrying the class.
+
 The **native host and install.sh**, unlike the CSS, *are* testable headlessly —
 do that rather than asking the user to click through a browser. Both honor
 `$HOME` and `$XDG_RUNTIME_DIR`, so point them at a scratch dir:
