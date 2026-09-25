@@ -77,6 +77,29 @@ script.
     each classified by USAGE (which CSS property consumes it — background →
     surface, color/fill → text; grey-level guessing is under-determined and
     broke light mode) and re-stomped via a fast rAF paint path on re-renders.
+    Three measurements (2026-09-22, live board + issue views) shape the scan:
+    **(1)** Linear paints in `lch()`, and Chromium returns computed colors in
+    the authored space — so every color goes through `hexToRgb`'s canvas path
+    (below); a parser that only knows hex/rgb sees `null` for the whole page.
+    **(2)** Consumer rules sit inside `@layer`/`@media` blocks and the
+    current-mode slot values live in `document.adoptedStyleSheets` — the scan
+    (`linearEachStyleRule`) recurses grouping rules and includes adopted sheets;
+    a top-level walk of `document.styleSheets` finds nothing. Slot originals are
+    read from the root's computed style with our var sheet disabled, so a
+    reapply never reads back its own override. **(3)** Roles are usage COUNTS
+    with a 3× dominance rule: the main card fill has ~40 background consumers
+    and one `color` consumer, and "any text usage → ambiguous" discarded it.
+    The direct re-stomp walk (rects + computed styles over the visible page) is
+    throttled to 500ms; on a virtualized list it ran every frame and was the
+    extension's entire CPU cost while scrolling.
+    **(4)** StyleX *dynamic* styles (the agent composer, popover surfaces)
+    bypass the slots entirely: the literal lands as an inline custom property
+    on the element (`style="--x-backgroundColor: lch(11.5% 7 283)"`) consumed
+    by an atomic class. A root-level remap cannot reach an inline declaration,
+    so `linearDirectPaintInlineVars` re-stomps surface-role `--x-*` literals
+    in place (`setProperty(..., "important")` on the element's own style), and
+    a `style`-attribute observer re-runs it after React rewrites the attribute.
+    Roles for `--x-*` names come from the same usage scan as `--sx-*`.
     **Requires Linear's interface theme set to "System preference"** (Ctrl+K →
     "Change interface theme"; per-device, client-DB-backed — with a pinned
     Light/Dark theme Linear renders hardcoded lch() styles no override can
@@ -291,6 +314,11 @@ removes the need entirely. Consequences to preserve when editing:
    [linearized WCAG channels], `shade`, `withAlpha`, `mix`), `deriveSurfaces()`,
    and the `OmarchyTheme` registry. Dark vs. light is decided by **WCAG relative
    luminance** of the terminal bg (`< 0.5` = dark), *not* the day/night name.
+   `hexToRgb` accepts any CSS color: hex and `rgb()` are parsed, anything else
+   (`lch()`, `oklch()`, `color-mix()` — what `getComputedStyle` returns for a
+   site authored in those spaces) is normalized to sRGB through a memoized 1×1
+   canvas readback. Feed it computed styles directly; a probe element is never
+   needed.
    `content.js` is the Slack **pack**: it ends with `OmarchyTheme.register(...)`.
 2. **`applySlackTheme(theme, s)`** (the pack's `apply` hook) — takes the surfaces
    `s` the engine derived (`sidebarBg`, `chromeBg`, `hoverBg`, `selectedBg`, …).

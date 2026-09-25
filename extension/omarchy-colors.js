@@ -5,17 +5,52 @@
 // every later script (omarchy-surfaces.js, omarchy-runtime.js, and each app
 // pack) shares these in the content script's isolated-world global scope.
 
+// Chromium (111+) keeps a computed color in the space it was authored in:
+// getComputedStyle() on a StyleX/lch() app returns "lch(6.2 6.6 282)", not
+// rgb(). Anything that is not hex or rgb() is normalized to sRGB by painting
+// it into a 1×1 canvas and reading the pixel back — exact for lch/oklch/
+// color()/color-mix(), ~10µs a call, and memoized because a page has a few
+// hundred distinct color strings. `a` is the resolved alpha; the hex and rgb()
+// paths do not report one.
+const cssColorCache = new Map();
+let cssColorCtx = null;
+function cssColorToRgb(value) {
+  let hit = cssColorCache.get(value);
+  if (hit !== undefined) return hit;
+  if (!cssColorCtx) {
+    const c = document.createElement("canvas");
+    c.width = c.height = 1;
+    cssColorCtx = c.getContext("2d", { willReadFrequently: true });
+  }
+  const ctx = cssColorCtx;
+  // An unparseable value leaves fillStyle at the sentinel.
+  ctx.fillStyle = "#010203";
+  ctx.fillStyle = value;
+  if (ctx.fillStyle === "#010203") {
+    hit = null;
+  } else {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillRect(0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data;
+    hit = { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+  }
+  cssColorCache.set(value, hit);
+  return hit;
+}
+
 function hexToRgb(hex) {
+  if (typeof hex !== "string" || !hex) return null;
   // Accept rgb(r, g, b) too — shade() emits that form, and we sometimes
   // chain shade() output back through mix()/withAlpha().
-  if (typeof hex === "string" && hex.startsWith("rgb")) {
+  if (hex.startsWith("rgb")) {
     const m = hex.match(/\d+/g);
     if (m && m.length >= 3) {
       return { r: +m[0], g: +m[1], b: +m[2] };
     }
     return null;
   }
-  const h = (hex || "").replace("#", "");
+  if (!hex.startsWith("#")) return cssColorToRgb(hex.trim());
+  const h = hex.slice(1);
   if (h.length < 6) return null;
   return {
     r: parseInt(h.slice(0, 2), 16),

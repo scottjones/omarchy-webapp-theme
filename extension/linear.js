@@ -28,9 +28,15 @@
 // Token / behavior verified via Playwright against the live logged-in app
 // (2026-08-04: shell + review/ticket views; light-mode fixed same day by
 // usage-based slot classification + the System-preference requirement).
+// Re-verified 2026-09-22 (Chromium 152, board + issue views, dark and light
+// omarchy themes) after the lch() / adopted-sheet / @layer fixes: 40 slots
+// remapped where 0 were before, extension main-thread time while scrolling a
+// virtualized board down from 15% to 1%, style/layout at no-extension baseline.
 
-// Resolve any CSS color (hex / rgb / lch / var chain) to {r,g,b} via the
-// browser. Returns null for non-colors (lengths, fonts, shorthands).
+// Resolve any CSS color (hex / rgb / lch / var chain) to {r,g,b}. Returns null
+// for non-colors (lengths, fonts, shorthands). Only a var() chain needs the
+// DOM (it resolves against :root); literal colors go through hexToRgb's canvas
+// path, which is memoized and forces no style recalc.
 function linearResolveRgb(value) {
   if (!value) return null;
   const v = String(value).trim();
@@ -41,6 +47,7 @@ function linearResolveRgb(value) {
   if (/^(clip|auto|none|solid|hidden|scroll|flex|block|inline)/i.test(v)) return null;
   if (/\b\d+px\b/.test(v) && !/^(#|rgb|hsl|lch|lab|color|oklch)/i.test(v)) return null;
   if (/var\(--font/i.test(v)) return null;
+  if (!v.includes("var(")) return hexToRgb(v);
 
   const probe = document.createElement("div");
   // The id matters: the sx-watch observer ignores omarchy-* nodes. Without it,
@@ -80,6 +87,32 @@ function linearElevation(s) {
   };
 }
 
+// Every style rule Linear ships, wherever it lives: document sheets AND
+// document.adoptedStyleSheets (Linear's theme provider writes the current
+// mode's --sx-* values to an adopted sheet, invisible to document.styleSheets),
+// descending through @media / @layer / @supports / @container blocks (where
+// most of Linear's rules sit; a grouping rule has no .style of its own). Our
+// own <style> tags are skipped.
+function linearEachStyleRule(fn) {
+  const visit = (rules) => {
+    for (const rule of rules) {
+      if (rule.style) fn(rule);
+      else if (rule.cssRules) visit(rule.cssRules);
+    }
+  };
+  const sheets = [...document.styleSheets, ...(document.adoptedStyleSheets || [])];
+  for (const sheet of sheets) {
+    if (sheet.ownerNode?.id?.startsWith?.("omarchy-")) continue;
+    let rules;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue; // cross-origin
+    }
+    visit(rules);
+  }
+}
+
 // StyleX reuses neutral greys for BOTH fills and text, and grey level alone
 // cannot tell them apart in light mode (a near-black value is a dark fill OR
 // light-mode text; near-white is a light fill OR dark-mode text). So classify
@@ -89,12 +122,15 @@ function linearElevation(s) {
 //   color / fill / stroke / caret-color  → text slot
 //   border* / outline*                   → border slot
 // A slot referenced only by other custom properties inherits the consumer's
-// role (one propagation pass). Slots consumed as BOTH surface and text are
-// ambiguous — leave them to Linear rather than guess.
+// roles (one propagation pass). Usages are COUNTED: Linear's main card fill is
+// consumed by ~40 background rules and one `color` rule (an inverted label),
+// so a slot is what most of its consumers say it is. Only a slot whose
+// surface and text usage are within 3× of each other is truly ambiguous —
+// leave those to Linear rather than guess.
 //
 // Hashes change between Linear builds — never hard-code --sx-* names.
 function linearSxRoles() {
-  const roles = {}; // name -> { surface?: true, text?: true, border?: true }
+  const roles = {}; // name -> { surface?: n, text?: n, border?: n } usage counts
   const aliasEdges = []; // [definingPropName, referencedSlotName]
   const roleOf = (prop) => {
     if (/^background/.test(prop)) return "surface";
@@ -109,37 +145,30 @@ function linearSxRoles() {
     if (/^(border|outline)/.test(prop)) return "border";
     return null;
   };
-  for (const sheet of document.styleSheets) {
-    let rules;
-    try {
-      rules = sheet.cssRules;
-    } catch {
-      continue;
-    }
-    for (const rule of rules || []) {
-      if (!rule.style) continue;
-      if (rule.parentStyleSheet?.ownerNode?.id?.startsWith?.("omarchy-")) continue;
-      for (let i = 0; i < rule.style.length; i++) {
-        const prop = rule.style[i];
-        const v = rule.style.getPropertyValue(prop);
-        if (!v || !v.includes("--sx-")) continue;
-        const refs = v.match(/--sx-[A-Za-z0-9-]+/g) || [];
-        if (prop.startsWith("--")) {
-          for (const n of refs) aliasEdges.push([prop, n]);
-          continue;
-        }
-        const role = roleOf(prop);
-        if (!role) continue;
-        for (const n of refs) (roles[n] ||= {})[role] = true;
+  linearEachStyleRule((rule) => {
+    for (let i = 0; i < rule.style.length; i++) {
+      const prop = rule.style[i];
+      const v = rule.style.getPropertyValue(prop);
+      if (!v || !/--s?x-/.test(v)) continue;
+      const refs = v.match(/--s?x-[A-Za-z0-9-]+/g) || [];
+      if (prop.startsWith("--")) {
+        for (const n of refs) aliasEdges.push([prop, n]);
+        continue;
+      }
+      const role = roleOf(prop);
+      if (!role) continue;
+      for (const n of refs) {
+        const r = (roles[n] ||= {});
+        r[role] = (r[role] || 0) + 1;
       }
     }
-  }
+  });
   // One propagation pass: --x: var(--sx-y) hands --x's roles to --sx-y.
   for (const [from, to] of aliasEdges) {
     const src = roles[from];
     if (!src) continue;
     const dst = (roles[to] ||= {});
-    for (const r of Object.keys(src)) dst[r] = true;
+    for (const [r, n] of Object.entries(src)) dst[r] = (dst[r] || 0) + n;
   }
   return roles;
 }
@@ -171,7 +200,7 @@ function linearSxRemaps(s) {
   if (!document.documentElement) return remaps;
 
   const elev = linearElevation(s);
-  const text = {
+  const textColors = {
     primary: s.fg,
     secondary: withAlpha(s.fg, s.isDark ? 0.9 : 0.78),
     tertiary: s.sidebarMuted,
@@ -179,10 +208,10 @@ function linearSxRemaps(s) {
   };
   const ourColors = [
     ...Object.values(elev),
-    text.primary,
-    text.secondary,
-    text.tertiary,
-    text.quaternary,
+    textColors.primary,
+    textColors.secondary,
+    textColors.tertiary,
+    textColors.quaternary,
   ];
   const ourRgb = ourColors.map((c) => hexToRgb(c)).filter(Boolean);
   const isOurs = (rgb) =>
@@ -193,53 +222,51 @@ function linearSxRemaps(s) {
         Math.abs(o.b - rgb.b) <= 4
     );
 
-  // Prefer ORIGINAL stylesheet values so reapply doesn't re-bucket our own
-  // overrides up the ladder.
-  const original = {};
+  // Slot names come from wherever Linear declares them; slot VALUES come from
+  // the root's computed style with our var sheet switched off — that is the
+  // value Linear resolved for the current mode, var() chains included, and
+  // not the override we wrote on the last apply (which would read as "ours",
+  // drop the slot, and flip it back on the next reapply). Reading one
+  // element's computed style while the sheet is disabled recalculates only
+  // that element; the document-wide recalc happens once anyway when the
+  // engine rewrites the sheet after this returns.
   const names = new Set();
-  for (const sheet of document.styleSheets) {
-    let rules;
-    try {
-      rules = sheet.cssRules;
-    } catch {
-      continue;
+  linearEachStyleRule((rule) => {
+    for (let i = 0; i < rule.style.length; i++) {
+      const p = rule.style[i];
+      if (p.startsWith("--sx-")) names.add(p);
     }
-    for (const rule of rules || []) {
-      if (!rule.style) continue;
-      if (rule.parentStyleSheet?.ownerNode?.id?.startsWith?.("omarchy-")) continue;
-      for (let i = 0; i < rule.style.length; i++) {
-        const p = rule.style[i];
-        if (!p.startsWith("--sx-")) continue;
-        names.add(p);
-        const v = rule.style.getPropertyValue(p).trim();
-        const sel = rule.selectorText || "";
-        const modeHit = s.isDark
-          ? /\.dark\b|dark-theme|color-scheme:\s*dark/i.test(sel)
-          : /\.light\b|light-theme|color-scheme:\s*light/i.test(sel);
-        if (v && (modeHit || !original[p])) original[p] = v;
-      }
-    }
-  }
+  });
+  const original = {};
+  const varsSheet = document.getElementById("omarchy-webapp-vars");
+  if (varsSheet) varsSheet.disabled = true;
   const cs = getComputedStyle(document.documentElement);
   for (let i = 0; i < cs.length; i++) {
     if (cs[i].startsWith("--sx-")) names.add(cs[i]);
   }
+  for (const prop of names) original[prop] = cs.getPropertyValue(prop).trim();
+  if (varsSheet) varsSheet.disabled = false;
 
   const roles = linearSxRoles();
+  linearLastRoles = roles;
   const borderNormal = s.borderColor;
   const borderStrong = withAlpha(s.fg, s.isDark ? 0.16 : 0.14);
   for (const prop of names) {
-    const value = original[prop] || cs.getPropertyValue(prop).trim();
+    const value = original[prop];
     if (!value) continue;
     const rgb = linearResolveRgb(value);
     if (!rgb || !linearIsNeutralRgb(rgb)) continue;
     if (isOurs(rgb)) continue;
     const role = roles[prop] || {};
-    if (role.surface && role.text) continue; // ambiguous — leave it to Linear
+    const surface = role.surface || 0;
+    const text = role.text || 0;
     const level = linearGreyLevel(rgb);
     let bucket = null;
-    if (role.surface) bucket = linearSurfaceBucket(level, elev);
-    else if (role.text) bucket = linearTextBucket(level, text);
+    if (surface && text && surface < 3 * text && text < 3 * surface) {
+      continue; // ambiguous — leave it to Linear
+    }
+    if (surface > text) bucket = linearSurfaceBucket(level, elev);
+    else if (text) bucket = linearTextBucket(level, textColors);
     else if (role.border)
       bucket = Math.abs(level - 0.5) * 2 > 0.5 ? borderStrong : borderNormal;
     // No known consumer → skip. Guessing unconsumed slots by grey level is
@@ -293,23 +320,90 @@ html body [data-restore-scroll-view="pull-request-code-view"] {
 `.replace(/\s+/g, " ");
 }
 
+// Which omarchy surface a painted Linear grey becomes, or null when it is not
+// a plausible chrome grey for the current mode. Direct paint only touches
+// backgrounds — surface buckets, never text.
+function linearStompBucket(rgb, s, elev) {
+  const level = linearGreyLevel(rgb);
+  if (s.isDark) {
+    if (level < 0.035 || level > 0.28) return null;
+    if (level < 0.1) return elev.bgPrimary;
+    if (level < 0.13) return elev.bgSecondary;
+    if (level < 0.16) return elev.bgTertiary;
+    return elev.bgQuaternary;
+  }
+  if (level <= 0.32) {
+    if (level < 0.08) return elev.bgPrimary;
+    if (level < 0.14) return elev.bgSecondary;
+    if (level < 0.2) return elev.bgTertiary;
+    return elev.bgQuaternary;
+  }
+  if (level >= 0.86 && level < 0.965) {
+    if (level > 0.94) return elev.bgPrimary;
+    if (level > 0.91) return elev.bgSecondary;
+    if (level > 0.88) return elev.bgTertiary;
+    return elev.bgQuaternary;
+  }
+  return null;
+}
+
+function linearIsOurSurface(rgb, elev) {
+  for (const c of Object.values(elev)) {
+    const o = hexToRgb(c);
+    if (
+      o &&
+      Math.abs(o.r - rgb.r) <= 3 &&
+      Math.abs(o.g - rgb.g) <= 3 &&
+      Math.abs(o.b - rgb.b) <= 3
+    )
+      return true;
+  }
+  return false;
+}
+
+// StyleX DYNAMIC styles (the agent composer, popover surfaces) bypass the
+// --sx-* slots: the literal lands as an inline custom property on the element
+// itself — style="--x-backgroundColor: lch(11.5% 7 283)" — consumed by an
+// atomic class (`.sx-… { background-color: var(--x-backgroundColor) }`). A
+// root-level remap cannot reach an inline declaration, so re-stomp the
+// declaration in place. Only surface-role names (per the same usage scan that
+// classifies the slots — the consumer is `background-color`) with a literal
+// neutral grey are touched; icon/fill colors stay Linear's. No layout reads:
+// ~0.5ms for the whole page.
+let linearLastRoles = null;
+function linearDirectPaintInlineVars(s) {
+  if (!document.body || !linearLastRoles) return;
+  const elev = linearElevation(s);
+  const paints = [];
+  for (const el of document.body.querySelectorAll("[style*='--x-']")) {
+    for (const prop of el.style) {
+      if (!prop.startsWith("--x-")) continue;
+      const role = linearLastRoles[prop];
+      if (!role || !role.surface || role.surface <= 3 * (role.text || 0)) continue;
+      const value = el.style.getPropertyValue(prop).trim();
+      if (!value || value.includes("var(")) continue;
+      const rgb = hexToRgb(value);
+      if (!rgb || (rgb.a !== undefined && rgb.a < 0.5)) continue;
+      if (!linearIsNeutralRgb(rgb) || linearIsOurSurface(rgb, elev)) continue;
+      const bucket = linearStompBucket(rgb, s, elev);
+      if (bucket) paints.push([el, prop, bucket]);
+    }
+  }
+  for (const [el, prop, bucket] of paints) {
+    el.style.setProperty(prop, bucket, "important");
+  }
+}
+
 // Styled-components / StyleX sometimes set background as a literal lch() or
 // hex on the element. Walk large visible nodes and restomp neutrals that still
 // match Linear greys. Also clear stale inline paints from the opposite mode.
+//
+// All reads (rects, computed styles) happen before the first write. A style
+// write mid-walk invalidates layout and the next rect read forces a
+// synchronous relayout — once per element, on every pass.
 function linearDirectPaintSurfaces(s) {
   if (!document.body) return;
   const elev = linearElevation(s);
-  const our = Object.values(elev)
-    .map((c) => hexToRgb(c))
-    .filter(Boolean);
-
-  const isAlreadyOurs = (rgb) =>
-    our.some(
-      (o) =>
-        Math.abs(o.r - rgb.r) <= 3 &&
-        Math.abs(o.g - rgb.g) <= 3 &&
-        Math.abs(o.b - rgb.b) <= 3
-    );
 
   const nodes = document.body.querySelectorAll(
     "main, header, [data-scroll-container], [class*='section-to-print'], [data-restore-scroll-view]"
@@ -327,46 +421,33 @@ function linearDirectPaintSurfaces(s) {
   }
 
   const seen = new Set();
+  const clears = [];
+  const paints = [];
   for (const el of [...nodes, ...extra]) {
     if (seen.has(el)) continue;
     seen.add(el);
-    const cs = getComputedStyle(el);
-    const bg = cs.backgroundColor;
+    const bg = getComputedStyle(el).backgroundColor;
     const rgb = hexToRgb(bg);
     if (!rgb) continue;
 
     // Drop inline paint we applied under the opposite mode (wrong contrast).
-    if (el.dataset.omarchyLinearPaint === "1") {
-      if (!isAlreadyOurs(rgb)) {
-        el.style.removeProperty("background-color");
-        delete el.dataset.omarchyLinearPaint;
-      }
+    if (el.dataset.omarchyLinearPaint === "1" && !linearIsOurSurface(rgb, elev)) {
+      clears.push(el);
     }
 
+    // A see-through wrapper is not a grey surface, whatever its rgb says.
+    if (bg === "rgba(0, 0, 0, 0)" || (rgb.a !== undefined && rgb.a < 0.5)) continue;
     if (!linearIsNeutralRgb(rgb)) continue;
-    if (isAlreadyOurs(rgb)) continue;
-    // Direct paint only touches backgrounds — use surface buckets, not text.
-    const level = linearGreyLevel(rgb);
-    let bucket = null;
-    if (s.isDark) {
-      if (level >= 0.035 && level <= 0.28) {
-        if (level < 0.1) bucket = elev.bgPrimary;
-        else if (level < 0.13) bucket = elev.bgSecondary;
-        else if (level < 0.16) bucket = elev.bgTertiary;
-        else bucket = elev.bgQuaternary;
-      }
-    } else if (level <= 0.32) {
-      if (level < 0.08) bucket = elev.bgPrimary;
-      else if (level < 0.14) bucket = elev.bgSecondary;
-      else if (level < 0.2) bucket = elev.bgTertiary;
-      else bucket = elev.bgQuaternary;
-    } else if (level >= 0.86 && level < 0.965) {
-      if (level > 0.94) bucket = elev.bgPrimary;
-      else if (level > 0.91) bucket = elev.bgSecondary;
-      else if (level > 0.88) bucket = elev.bgTertiary;
-      else bucket = elev.bgQuaternary;
-    }
-    if (!bucket) continue;
+    if (linearIsOurSurface(rgb, elev)) continue;
+    const bucket = linearStompBucket(rgb, s, elev);
+    if (bucket) paints.push([el, bucket]);
+  }
+
+  for (const el of clears) {
+    el.style.removeProperty("background-color");
+    delete el.dataset.omarchyLinearPaint;
+  }
+  for (const [el, bucket] of paints) {
     el.style.setProperty("background-color", bucket, "important");
     el.dataset.omarchyLinearPaint = "1";
   }
@@ -376,6 +457,9 @@ function linearDirectPaintSurfaces(s) {
 // On light themes, restomp near-white text sitting on light surfaces so body
 // copy stays readable. Skip text on dark chips/selected rows (light-on-dark
 // is correct there).
+//
+// Reads before writes, as in linearDirectPaintSurfaces. getComputedStyle()
+// already returns the resolved color — hexToRgb normalizes it, no probe.
 function linearDirectPaintText(s) {
   if (!document.body) return;
 
@@ -390,19 +474,7 @@ function linearDirectPaintText(s) {
 
   const fg = s.fg;
   const muted = s.sidebarMuted;
-
-  // One reusable probe per pass (this runs per rAF on busy views; a probe per
-  // node was 400 appends/removes per frame). id keeps the observer ignoring it.
-  const probeEl = document.createElement("div");
-  probeEl.id = "omarchy-linear-probe";
-  probeEl.style.display = "none";
-  document.documentElement.appendChild(probeEl);
-  const resolveColorRgb = (value) => {
-    if (!value) return null;
-    probeEl.style.color = "";
-    probeEl.style.color = value;
-    return hexToRgb(getComputedStyle(probeEl).color);
-  };
+  const fallbackBgLevel = linearGreyLevel(hexToRgb(s.bg) || { r: 240, g: 240, b: 240 });
 
   const effectiveBgLevel = (el) => {
     let n = el;
@@ -410,20 +482,21 @@ function linearDirectPaintText(s) {
       const bg = getComputedStyle(n).backgroundColor;
       const rgb = hexToRgb(bg);
       if (!rgb) continue;
-      // Skip fully transparent.
-      if (/rgba\([^)]*,\s*0\s*\)$/.test(bg.replace(/\s/g, ""))) continue;
-      if (bg === "transparent" || bg === "rgba(0, 0, 0, 0)") continue;
+      // Skip (near) transparent.
+      if (bg === "rgba(0, 0, 0, 0)") continue;
+      if (rgb.a !== undefined ? rgb.a < 0.05 : /rgba\([^)]*,\s*0\s*\)$/.test(bg.replace(/\s/g, ""))) continue;
       return linearGreyLevel(rgb);
     }
-    return linearGreyLevel(hexToRgb(s.bg) || { r: 240, g: 240, b: 240 });
+    return fallbackBgLevel;
   };
 
   const nodes = document.body.querySelectorAll(
     "span, a, p, button, label, li, h1, h2, h3, h4, td, th, div"
   );
-  let painted = 0;
+  const clears = [];
+  const paints = [];
   for (const el of nodes) {
-    if (painted > 400) break;
+    if (paints.length > 400) break;
     const r = el.getBoundingClientRect();
     if (r.width < 8 || r.height < 6) continue;
     if (r.bottom < 0 || r.top > innerHeight + 50) continue;
@@ -432,35 +505,33 @@ function linearDirectPaintText(s) {
 
     const cs = getComputedStyle(el);
     if (cs.visibility === "hidden" || cs.display === "none") continue;
-    const rgb = resolveColorRgb(cs.color);
+    const rgb = hexToRgb(cs.color);
     if (!rgb || !linearIsNeutralRgb(rgb)) continue;
     const textLevel = linearGreyLevel(rgb);
     // Only fix light/washed text.
-    if (textLevel < 0.72) {
-      if (el.dataset.omarchyLinearText === "1") {
-        // Previously forced; if it's fine now, leave it.
-      }
-      continue;
-    }
+    if (textLevel < 0.72) continue;
 
-    const bgLevel = effectiveBgLevel(el);
     // Dark surface (selected row, dark chip) — light text is intentional.
-    if (bgLevel < 0.45) {
-      if (el.dataset.omarchyLinearText === "1") {
-        el.style.removeProperty("color");
-        delete el.dataset.omarchyLinearText;
-      }
+    if (effectiveBgLevel(el) < 0.45) {
+      if (el.dataset.omarchyLinearText === "1") clears.push(el);
       continue;
     }
 
-    el.style.setProperty("color", textLevel > 0.9 ? fg : muted, "important");
-    el.dataset.omarchyLinearText = "1";
-    painted++;
+    paints.push([el, textLevel > 0.9 ? fg : muted]);
   }
-  probeEl.remove();
+
+  for (const el of clears) {
+    el.style.removeProperty("color");
+    delete el.dataset.omarchyLinearText;
+  }
+  for (const [el, color] of paints) {
+    el.style.setProperty("color", color, "important");
+    el.dataset.omarchyLinearText = "1";
+  }
 }
 
-function linearPaint(theme, s) {
+// The cheap half of a paint: mode pin + structural sheet. Safe on every frame.
+function linearPaintChrome(s) {
   linearPinColorMode(s.isDark);
 
   let style = document.getElementById("omarchy-linear-paint");
@@ -469,19 +540,35 @@ function linearPaint(theme, s) {
     style.id = "omarchy-linear-paint";
     (document.head || document.documentElement).appendChild(style);
   }
-  style.textContent = linearStructuralCss(s);
+  // Assigning identical textContent still replaces the sheet and invalidates
+  // style for the whole document.
+  const css = linearStructuralCss(s);
+  if (style.textContent !== css) style.textContent = css;
+}
+
+// The expensive half: rect + computed-style walks over the visible page.
+function linearPaintDirect(s) {
+  linearDirectPaintInlineVars(s);
   linearDirectPaintSurfaces(s);
   linearDirectPaintText(s);
+}
+
+function linearPaint(theme, s) {
+  linearPaintChrome(s);
+  linearPaintDirect(s);
 }
 
 // Linear injects StyleX slots after first paint and on route changes, and its
 // React re-renders (heaviest on the issue view) replace nodes that we painted
 // inline — each replacement briefly shows Linear's hardcoded grey. Two paths:
 //
-//  - FAST (rAF-coalesced, like the Slack pack's paintActiveRows): re-run only
-//    the paint layer (mode pin + structural css + direct re-stomp). This is
-//    what closes the visible grey flash — it runs on the next frame after a
-//    re-render instead of 150ms later.
+//  - FAST (rAF-coalesced, like the Slack pack's paintActiveRows): re-pin the
+//    mode + structural css on the next frame, and re-run the direct re-stomp
+//    at most every DIRECT_PAINT_MS. The first re-render after a quiet spell
+//    still gets its re-stomp right away (the timer fires at 0); it is a
+//    virtualized list mounting rows on every frame of a scroll that gets
+//    coalesced — that walk measures every large node on the page and was the
+//    extension's whole CPU cost while scrolling.
 //  - FULL (debounced): OmarchyTheme.reapply(), which recomputes the sx remaps.
 //    Only needed when NEW stylesheets appear (new --sx-* slots possible).
 //
@@ -491,13 +578,29 @@ function linearArmSxWatch() {
   if (linearArmSxWatch._armed) return;
   linearArmSxWatch._armed = true;
 
+  const DIRECT_PAINT_MS = 500;
+  let directTimer = 0;
+  let lastDirect = -Infinity;
+  const kickDirect = () => {
+    if (directTimer) return;
+    const wait = Math.max(0, lastDirect + DIRECT_PAINT_MS - performance.now());
+    directTimer = setTimeout(() => {
+      directTimer = 0;
+      lastDirect = performance.now();
+      const cur = OmarchyTheme.current;
+      if (cur) linearPaintDirect(cur.surfaces);
+    }, wait);
+  };
+
   let raf = 0;
   const kickFast = () => {
     if (raf) return;
     raf = requestAnimationFrame(() => {
       raf = 0;
       const cur = OmarchyTheme.current;
-      if (cur) linearPaint(cur.theme, cur.surfaces);
+      if (!cur) return;
+      linearPaintChrome(cur.surfaces);
+      kickDirect();
     });
   };
 
@@ -540,6 +643,15 @@ function linearArmSxWatch() {
     attributes: true,
     attributeFilter: ["class"],
     childList: true,
+    subtree: true,
+  });
+
+  // Inline --x-* literals are rewritten by React on re-render (a style
+  // attribute change, not a node insertion). Our own setProperty lands here
+  // too: the follow-up pass finds nothing to change and the chain stops.
+  new MutationObserver(kickDirect).observe(document.body || document.documentElement, {
+    attributes: true,
+    attributeFilter: ["style"],
     subtree: true,
   });
 
