@@ -909,6 +909,18 @@ function applySlackTheme(theme, s) {
       --dt_color-ctr-pry: var(--omarchy-bg) !important;
       --dt_color-ctr-sec: ${mix(theme.bg, fg, 0.06)} !important;
       --dt_color-otl-sec: ${withAlpha(fg, 0.3)} !important;
+      /* The same controls step to base-ter in two states: a DISABLED outline
+         button or checkbox (c-button--disabled fills from it), and the hover of
+         the rounded filter pill. Give it the placeholder lift used below. */
+      --dt_color-base-ter: ${mix(theme.bg, fg, 0.08)} !important;
+    }
+    /* The rounded, entity-sort and search-filter pill variants outline with
+       otl-ter, not otl-sec. Globally that token is the faint 8% hairline, but
+       these pills fill like the page, so they need the same visible edge as
+       an outline button. Scoped to the pills, because otl-ter also draws
+       dividers everywhere else. */
+    html body [class*="searchFilterSingleSelectButton"] {
+      --dt_color-otl-ter: ${withAlpha(fg, 0.3)} !important;
     }
     html body .c-base_icon,
     html body .c-base_icon__width_only_container,
@@ -926,8 +938,14 @@ function applySlackTheme(theme, s) {
       --dt_color-base-ter: ${mix(theme.bg, fg, 0.08)} !important;
       --dt_color-otl-sec: ${withAlpha(fg, 0.3)} !important;
     }
-    html body .c-message_attachment {
+    /* Two card generations. The legacy root (c-message_attachment) is what a
+       shared-thread unfurl uses; the current one, c-message_attachment_v3, is a
+       SIBLING root rather than a descendant, so it needs naming too. It fills
+       from base-pry and its hover border reads otl-sec. */
+    html body .c-message_attachment,
+    html body .c-message_attachment_v3 {
       --dt_color-base-pry: var(--omarchy-bg) !important;
+      --dt_color-otl-sec: ${withAlpha(fg, 0.3)} !important;
     }
 
     /* ===== message hover ===== */
