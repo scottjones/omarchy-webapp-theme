@@ -875,6 +875,61 @@ function applySlackTheme(theme, s) {
        those children correctly and the rule was instead causing messages to
        bleed through the tab strip.) */
 
+    /* ===== base-family components: outline buttons, placeholders, cards =====
+       Shared components paint straight from the dt_color base- tokens the
+       token block leaves unmapped, so they kept Slack's own greys on every
+       theme: outline buttons (base-pry at rest, base-sec on hover and active),
+       the fill behind avatars and image thumbnails (base-ter), and message
+       attachment cards such as a shared-thread unfurl (base-pry). The token
+       stays unmapped globally for the reason given in the token block, so the
+       tokens are redefined ON each component instead, the tooltip precedent:
+       the component's own declarations, its hover and active states and its
+       descendants then resolve to themed values without naming a hashed class.
+       The mapping follows Slack's own relationships. base-pry IS the page
+       surface in both of Slack's modes (white on white, and the dark block ships
+       it equal to the dark page), so it becomes theme.bg; base-sec is one hover
+       step from it; base-ter is the placeholder fill that shows only while an
+       image loads or around a transparent bot avatar, so it stays a quiet lift.
+       Filter buttons (the Huddles and search pages' filter pills, and the
+       explorer's With / In buttons, which are also outline buttons) fill from
+       the ctr- CONTAINER family instead: the same white as base-pry in light
+       mode, a raised grey in dark. ctr- also paints menus, popovers and file
+       cards, about 350 consumers, so it too is redefined only on the buttons.
+       Their outline is otl-sec, which Slack ships as its STRONG hairline (half-
+       opaque grey, where otl-ter is 13%); an outline button filled like the page
+       is only visible by that edge, so it takes 30% fg, not the faint border.
+       Checkboxes (c-input_checkbox) are the same control shape: a base-pry box
+       with an outline, so they share the rule. */
+    html body .c-button--outline,
+    html body .c-input_checkbox,
+    html body [class*="searchFilterSingleSelectButton"],
+    html body [class*="p-huddles_page_filter_type"] {
+      --dt_color-base-pry: var(--omarchy-bg) !important;
+      --dt_color-base-sec: ${mix(theme.bg, fg, 0.06)} !important;
+      --dt_color-ctr-pry: var(--omarchy-bg) !important;
+      --dt_color-ctr-sec: ${mix(theme.bg, fg, 0.06)} !important;
+      --dt_color-otl-sec: ${withAlpha(fg, 0.3)} !important;
+    }
+    html body .c-base_icon,
+    html body .c-base_icon__width_only_container,
+    html body [class*="p-file_image_thumbnail__wrapper"],
+    html body [class*="c-file_gallery_image_file"],
+    html body [class*="engagement_status_badge_icon"] {
+      --dt_color-base-ter: ${mix(theme.bg, fg, 0.08)} !important;
+    }
+    /* The Activity page's list/grid layout switch is a segmented toggle built
+       from the same family: a base-ter track, a base-pry thumb under the
+       selected half, an otl-sec hairline. Redefined on the container, the
+       track, the thumb and its outline all follow. */
+    html body [class*="activity_filter_layout_toggle__container"] {
+      --dt_color-base-pry: var(--omarchy-bg) !important;
+      --dt_color-base-ter: ${mix(theme.bg, fg, 0.08)} !important;
+      --dt_color-otl-sec: ${withAlpha(fg, 0.3)} !important;
+    }
+    html body .c-message_attachment {
+      --dt_color-base-pry: var(--omarchy-bg) !important;
+    }
+
     /* ===== message hover ===== */
     html body [class*="c-message_kit__hover"]:hover,
     html body [class*="c-message_kit__background--hovered"] {
