@@ -1218,6 +1218,14 @@ if (document.body) {
 // Re-paint the active-row pill whenever Slack mutates class / aria /
 // inline-style on sidebar rows. Coalesced via rAF so a burst of mutations
 // during a React re-render only triggers one paint.
+//
+// The paint itself writes inline style on the observed subtree, so its own
+// mutation records must be discarded with takeRecords() — otherwise every
+// paint schedules the next one and the tab repaints at the display's refresh
+// rate for as long as a channel is selected (i.e. forever; measured at ~60
+// paints/s idle, and hidden windows only mask it because rAF pauses). Nothing
+// else can run between the paint and takeRecords(), so no genuine Slack
+// mutation is ever dropped.
 let activeRowsRaf = 0;
 function schedulePaintActiveRows() {
   if (activeRowsRaf) return;
@@ -1225,6 +1233,7 @@ function schedulePaintActiveRows() {
     activeRowsRaf = 0;
     paintActiveRows();
     paintTabStrips();
+    activeRowsObserver.takeRecords();
   });
 }
 const activeRowsObserver = new MutationObserver(schedulePaintActiveRows);
