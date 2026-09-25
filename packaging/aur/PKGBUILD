@@ -1,7 +1,7 @@
 # Maintainer: Scott Jones <scottajones@gmail.com>
 
 pkgname=omarchy-webapp-theme
-pkgver=0.3.7
+pkgver=0.3.8
 pkgrel=1
 pkgdesc="Make Slack, Discord, GitHub, Linear, Outlook, WhatsApp, Notion and HEY follow your Omarchy theme"
 arch=('any')
