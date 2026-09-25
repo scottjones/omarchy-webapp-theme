@@ -319,6 +319,26 @@ function applySlackTheme(theme, s) {
       color: var(--omarchy-fg) !important;
     }
 
+    /* ===== theme backdrop ("sunroof") ===== */
+    /* Slack's sidebar theme paints a 100vw x 100vh absolute layer,
+       .p-theme_background--sunroof, with an inline gradient built from the
+       theme's own (aubergine) palette. Focused it is masked to 40% at the top
+       fading to 95% by 200px; body.p-window--blurred remasks it to a flat 73%
+       and dims it 10%, and that mask swap is what showed as a purple cast along
+       the rail and top edge the moment the window lost focus. Every element
+       over it computes our brown, so a computed-style probe never finds the
+       culprit; only a pixel sample does (rail #2c2525 focused, #38202a blurred).
+       The gradient is an inline background-image, which our stylesheet
+       !important still outranks. Paint the layer flat theme bg, and drop the
+       mask/filter so focus changes no longer alter it. The huddle mini-player
+       backdrop is left alone; it is scoped to its own tile. */
+    html body .p-theme_background:not(.p-theme_background--huddle-mini) {
+      background-color: var(--omarchy-bg) !important;
+      background-image: none !important;
+      mask: none !important;
+      filter: none !important;
+    }
+
     /* Defensive: stop transparency leaking into dialog/menu chrome from our
        variable overrides. Just sets an opaque background — interior styling
        is left to Slack's color mode (which we now auto-flip reliably). */
@@ -1060,11 +1080,30 @@ function applySlackTheme(theme, s) {
     if (document.body) document.body.style.setProperty(k, v, "important");
   }
 
-  // Write inline-important background-color directly on the tab rail,
-  // channel sidebar, and top-nav elements. Slack sets its own inline styles
-  // on these on blur (reverting to default aubergine), which beats our
-  // external !important CSS. Inline-important on the element itself wins
-  // back the cascade.
+  paintChrome();
+
+  // Selected-row pill. Slack's React re-renders the active row after the
+  // initial paint and stomps our --selected bg with an inline style — so we
+  // paint inline ourselves to win that race. The mutation observer below
+  // re-runs this on every relevant attribute change in the sidebar, so it
+  // keeps winning even after Slack re-renders.
+  paintActiveRows();
+  paintTabStrips();
+}
+
+// Write inline-important background-color directly on the tab rail, channel
+// sidebar, and top-nav elements. Slack sets its own inline styles on these on
+// window blur (reverting to default aubergine), which beats our external
+// !important CSS. Inline-important on the element itself wins back the cascade.
+// Slack's blur-time rewrite is a `style` attribute mutation, so the observer
+// below re-runs this within a frame — the unfocused window stays themed
+// instead of drifting back to Slack's palette until the next theme push.
+// setProperty() with an unchanged value queues no mutation record, so the
+// re-stomp does not feed the observer that triggered it.
+function paintChrome() {
+  const cur = OmarchyTheme.current;
+  if (!cur || !cur.surfaces) return;
+  const { sidebarBg, chromeBg } = cur.surfaces;
   const directPaint = [
     [
       // The :not()s matter: these are substring matches, so "tab_rail" also hits
@@ -1088,66 +1127,74 @@ function applySlackTheme(theme, s) {
       chromeBg,
     ],
   ];
+  // "channel_sidebar" is a substring of the selected row's own class
+  // (p-channel_sidebar__channel--selected) and of its children, so this walk
+  // would repaint the pill paintActiveRows() owns. Skip what it has painted:
+  // otherwise the two alternate every throttle tick and the pill flickers.
   for (const [selector, color] of directPaint) {
     for (const el of document.querySelectorAll(selector)) {
+      if (paintedRowEls.has(el) || paintedDescendantEls.has(el)) continue;
       el.style.setProperty("background-color", color, "important");
     }
   }
-
-  // Selected-row pill. Slack's React re-renders the active row after the
-  // initial paint and stomps our --selected bg with an inline style — so we
-  // paint inline ourselves to win that race. The mutation observer below
-  // re-runs this on every relevant attribute change in the sidebar, so it
-  // keeps winning even after Slack re-renders.
-  paintActiveRows();
-  paintTabStrips();
 }
 
 // Track elements we've painted so we can wipe their inline styles when the
 // selection moves elsewhere — otherwise the old pill lingers on the
 // previously-selected row after navigation.
+//
+// Only elements that LEFT the selection are wiped. The earlier clear-then-repaint
+// of every row was self-sustaining: each removeProperty/setProperty pair on the
+// still-selected row queued `style` mutation records, the observer below
+// scheduled another rAF paint, and the pack repainted the sidebar every frame
+// for as long as any channel was selected — i.e. always.
 const paintedRowEls = new Set();
 const paintedDescendantEls = new Set();
 
 function paintActiveRows() {
-  // Always clear last paint first, even if no theme yet — keeps cleanup correct.
+  const cur = OmarchyTheme.current;
+  const bgRgb = cur ? hexToRgb(cur.theme.bg) : null;
+  const nextRows = new Set();
+  if (bgRgb) {
+    // Class-prefix-specific anchors so we don't accidentally paint pills on
+    // avatar online-dots (c-presence--active) or top-level nav items
+    // (p-channel_sidebar__link--page on Unreads/Huddles/etc — those keep
+    // Slack's default treatment, no pill).
+    const selector =
+      '[class*="channel_sidebar"] [class*="p-channel_sidebar__channel--selected"], ' +
+      '[class*="channel_sidebar"] [class*="p-channel_sidebar__channel--active"]';
+    const matches = Array.from(document.querySelectorAll(selector));
+    // Pick innermost matches only — when a row's wrapper and its inner
+    // button are both marked selected, paint just the inner one. Otherwise
+    // we get a faded outer pill AND a darker inner pill stacked.
+    for (const el of matches) {
+      if (!matches.some((other) => other !== el && el.contains(other))) nextRows.add(el);
+    }
+  }
+
   for (const el of paintedRowEls) {
+    if (nextRows.has(el)) continue;
     el.style.removeProperty("background-color");
     el.style.removeProperty("border-radius");
+    paintedRowEls.delete(el);
   }
-  paintedRowEls.clear();
   for (const el of paintedDescendantEls) {
+    let keep = false;
+    for (const row of nextRows) {
+      if (row.contains(el)) { keep = true; break; }
+    }
+    if (keep) continue;
     el.style.removeProperty("background-color");
+    paintedDescendantEls.delete(el);
   }
-  paintedDescendantEls.clear();
+  if (!nextRows.size) return;
 
-  const cur = OmarchyTheme.current;
-  if (!cur) return;
   const theme = cur.theme;
-  const bgRgb = hexToRgb(theme.bg);
-  if (!bgRgb) return;
   const isDark = relLuminance(bgRgb) < 0.5;
   const accent = theme.accent || (isDark ? "#7aa2f7" : "#1264a3");
   const pillBg = withAlpha(accent, 0.35);
 
-  // Class-prefix-specific anchors so we don't accidentally paint pills on
-  // avatar online-dots (c-presence--active) or top-level nav items
-  // (p-channel_sidebar__link--page on Unreads/Huddles/etc — those keep
-  // Slack's default treatment, no pill).
-  const selector =
-    '[class*="channel_sidebar"] [class*="p-channel_sidebar__channel--selected"], ' +
-    '[class*="channel_sidebar"] [class*="p-channel_sidebar__channel--active"]';
-  const matches = Array.from(document.querySelectorAll(selector));
-  if (!matches.length) return;
-
-  // Pick innermost matches only — when a row's wrapper and its inner
-  // button are both marked selected, paint just the inner one. Otherwise
-  // we get a faded outer pill AND a darker inner pill stacked.
-  const innermost = matches.filter(
-    (el) => !matches.some((other) => other !== el && el.contains(other))
-  );
-
-  for (const el of innermost) {
+  for (const el of nextRows) {
     el.style.setProperty("background-color", pillBg, "important");
     el.style.setProperty("border-radius", "8px", "important");
     paintedRowEls.add(el);
@@ -1216,15 +1263,34 @@ if (document.body) {
 }
 
 // Re-paint the active-row pill whenever Slack mutates class / aria /
-// inline-style on sidebar rows. Coalesced via rAF so a burst of mutations
-// during a React re-render only triggers one paint.
+// inline-style on sidebar rows, and re-stomp the rail/sidebar/nav paint that
+// Slack rewrites inline on window blur. Coalesced via rAF so a burst of
+// mutations during a React re-render only triggers one paint. paintChrome()
+// walks three wide selector lists, so it is additionally throttled: a
+// 200ms ceiling keeps the unfocused-window revert invisible while a huddle
+// (video tiles mutate every frame) does not pay for it 60 times a second.
+const PAINT_CHROME_MIN_INTERVAL_MS = 200;
 let activeRowsRaf = 0;
+let paintChromeLast = 0;
+let paintChromeTrailing = 0;
 function schedulePaintActiveRows() {
   if (activeRowsRaf) return;
-  activeRowsRaf = requestAnimationFrame(() => {
+  activeRowsRaf = requestAnimationFrame((now) => {
     activeRowsRaf = 0;
     paintActiveRows();
     paintTabStrips();
+    const wait = PAINT_CHROME_MIN_INTERVAL_MS - (now - paintChromeLast);
+    if (wait <= 0) {
+      paintChromeLast = now;
+      paintChrome();
+    } else if (!paintChromeTrailing) {
+      // Throttled: the mutation that got us here still needs its repaint, and
+      // it may be the last one Slack sends — don't drop it, defer it.
+      paintChromeTrailing = setTimeout(() => {
+        paintChromeTrailing = 0;
+        schedulePaintActiveRows();
+      }, wait);
+    }
   });
 }
 const activeRowsObserver = new MutationObserver(schedulePaintActiveRows);
@@ -1377,8 +1443,10 @@ function installHideStyle() {
   const s = document.createElement("style");
   s.id = AUTOMATION_HIDE_ID;
   // visibility only — pointer-events:none would block synthetic clicks reaching buttons.
+  // The live huddle is itself a [role="dialog"] (aria-label="Huddle"), so
+  // without the exemption a Color Mode flip blanks the call for the whole run.
   s.textContent = `
-    [role="dialog"],
+    [role="dialog"]:not([aria-label="Huddle"]),
     [class*="ReactModal__Overlay"],
     [class*="c-modal"],
     [class*="modal_overlay"],
@@ -1780,6 +1848,17 @@ async function closeDialog() {
 
 async function ensureSlackColorMode(targetIsDark) {
   const target = targetIsDark ? "Dark" : "Light";
+  // Only the main client (/client/...) has the Preferences UI this drives.
+  // A huddle pop-out is its own page at /huddle/<team>/<channel>: the content
+  // script runs there too, its thread composer satisfied the readiness check
+  // below, and the flow then hid every dialog and spent seconds firing
+  // synthetic Home/Ctrl+, clicks into a window that has no Preferences to
+  // open. Color Mode is a per-user Slack setting the main window already
+  // owns, so a pop-out has nothing to flip.
+  if (!location.pathname.startsWith("/client")) {
+    console.log("[omarchy] not the main client window; skipping", target, "flip");
+    return;
+  }
 
   // A hidden tab can't be driven — its timers are throttled to ~1 wake/minute,
   // which strands the Preferences modal mid-flow. Park it for the next time
