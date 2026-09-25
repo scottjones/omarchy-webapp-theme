@@ -205,7 +205,12 @@ script.
     **`key`** that pins the extension ID to `egagnaecglnnmbbnpbbccgajinplhckp`
     on every machine, so the host manifest's `allowed_origins` can be hardcoded.
     Never regenerate it — the ID is baked into the host manifest template and
-    into users' installed copies.
+    into users' installed copies. The shim, engine and Slack entries set
+    **`match_origin_as_fallback`**: Slack's huddle pop-out is a `window.open()`
+    child that is never navigated (its navigation entry is `about:blank`, it has
+    zero scripts of its own — the opener's React portals into it — and its URL
+    is rewritten to `/client/…` with `replaceState`). Content scripts don't
+    inject into `about:blank` without that flag, so the pop-out got no theme.
   - `icon-{16,32,48,128}.png` — the extension icon, wired into both `icons` and
     `action.default_icon`. Rasterized from `icon.svg`; don't hand-edit.
 - `icon.svg` — source of truth for the icon (regen command is in its comment).
@@ -292,8 +297,8 @@ removes the need entirely. Consequences to preserve when editing:
    **Destructure every field the CSS/`directPaint` uses — a missing one is a
    silent runtime ReferenceError** (this bit us with `chromeBg`). Then it builds
    one big CSS template string and injects it into a `<style id="omarchy-slack-style">`.
-3. **Three token systems, three different rules.** Slack is mid-migration, so the
-   same pane is painted by three families and each needs a different treatment:
+3. **Four token systems, three different rules.** Slack is mid-migration, so the
+   same pane is painted by several families and each needs a different treatment:
    - `--sk_*` — held as bare **`r, g, b` triplets** and composited at the point of
      use (`rgba(var(--sk_primary_foreground), .7)`). Write triplets via
      `toTriplet()`.
@@ -315,6 +320,22 @@ removes the need entirely. Consequences to preserve when editing:
      describes a surface that is no longer there. Custom properties inherit, so
      that one declaration re-inks the label and the shortcut keycaps without
      naming any of Slack's hashed atomic classes.
+   - `--dt_color-theme-*` — the **sidebar-theme family**, 61 tokens defined per
+     `.sk-client-theme--*` class from the aubergine `plt` scale (in dark mode 0
+     is darkest, 100 lightest). Consumed bare as real colors — hover/pressed
+     variants too, via `linear-gradient(var(--x), var(--x))`. It owns what the
+     pane rules don't: the whole **huddle chrome** (toolbar buttons are
+     `surf-inv-pry`, the toggled-on chip `base-pry` + `content-ter` ink, the
+     pop-out titlebar `base-inv-pry`), themed badges/banners (`base-imp`), the
+     `--themeInverse`/`--themeGhost` button variants, sidebar tabs. Mapped in
+     full by role: `base-*` solid fills (`base-pry` is the emphasis fill →
+     accent), `surf-*` fg washes at Slack's own .25/.08/.18 alphas, `content-*`
+     ink where `content-ter`/`content-imp`/`content-inv-imp` are ink ON the
+     accent and take `inkOn()`, `hgl-1` → `selectedBg`. **The token block is
+     also declared on `[class*="sk-client-theme--"]`**, not just the root: Slack
+     scopes theme classes to subtrees (the docked huddle bar is
+     `sk-client-theme--light-inverted-sidebar` in light mode) and its class rule
+     redefines all 61 on that element, which beats anything inherited from body.
    `--dt_color-plt-*` are raw palette primitives (~336 of them, triplet-consumed);
    they're brand scales, not semantic slots, so they're deliberately unmapped.
 4. **Inline-important overrides** — Slack sets its own high-specificity inline
@@ -334,11 +355,23 @@ removes the need entirely. Consequences to preserve when editing:
    this and ran at 60Hz whenever a channel was selected — diff the sets instead).
 7. **Color-mode automation** — `ensureSlackColorMode(isDark)` opens
    Preferences → Appearance and toggles the radio via a MAIN-world React bridge
-   (synthetic clicks don't fire Slack's handler reliably). It runs only under
-   `/client/`: the content script also loads in huddle pop-outs
-   (`/huddle/<team>/<channel>`), which have a composer but no Preferences, and
-   the hide style it installs exempts the live huddle's `[aria-label="Huddle"]`
-   dialog.
+   (synthetic clicks don't fire Slack's handler reliably). It runs only in the
+   main client: gated on `/client/` AND on the navigation entry not being
+   `about:blank` — the huddle pop-out passes the URL check (see `manifest.json`
+   above) but has no Preferences, and the flow used to hide every dialog and
+   spend seconds firing synthetic clicks into it. The hide style it installs
+   exempts the live huddle's `[aria-label^="Huddle"]` dialog (prefix: the label
+   is "Huddle in <channel>" on current builds).
+8. **Huddles** need almost no selectors — the chrome paints from the theme
+   family above. What's left: the `.p-theme_background` backdrop (pop-out
+   window, mini tile) goes flat with the sunroof rule; the video-tile backdrop is
+   an `<img>` of Slack's `/img/huddles/gradient_NN.png`, hidden by **src
+   substring** because the same class carries a user-chosen artist photo, which
+   stays; and two chrome buttons Slack paints as literal white pills
+   (`constants-white` / `brand-core-black`) get those tokens redefined on the
+   button itself, the tooltip precedent. Overlays that are white-on-video
+   (active-speaker pill, pin pill, tile actions) are left alone: legibility, not
+   theme. Slack's "Leave" red and the in-huddle green stay semantic.
 
 ## How the CSS rules are written (important conventions)
 
@@ -414,9 +447,18 @@ and drive `ctx.pages()` / `ctx.serviceWorkers()`. Gotchas, all learned the hard 
   chromium` + profile path + *absence* of `--type=`; matching on the debug port
   also matches the launching shell and self-kills it.
 - With no native host in that profile, the extension gets **no theme**, so it
-  injects nothing. Push one from the service worker instead:
-  `chrome.tabs.sendMessage(tabId, {type:"omarchy-theme", theme})` with the host's
-  payload shape. A full page navigation loses it — re-push after every reload.
+  injects nothing. Get a real payload by running the host headlessly (below) and
+  write it from the service worker with `chrome.storage.local.set({ theme })`:
+  `background.js` answers `request-theme` from storage and re-pushes on
+  `tabs.onUpdated`, so it survives every reload and restart. A one-off
+  `chrome.tabs.sendMessage(tabId, {type:"omarchy-theme", theme})` applies it
+  live to an open tab. The huddle pop-out has no `/huddle/` URL any more — it is
+  an `about:blank` child at `/client/…` (see `manifest.json`); find it among
+  `browser.pages()` by `document.querySelector('.p-huddle_window')`. Pop it out
+  and back in by hand — the titlebar's "Change view" ignores synthetic clicks.
+- Hot-test a CSS rule without a restart by editing
+  `#omarchy-slack-style`'s `textContent` in the page (or appending a scratch
+  `<style>`); only manifest and JS changes need the restart.
 - **Screenshots hang** when the window is occluded (no frames are composited);
   `fromSurface: false` doesn't help. Assert on `getComputedStyle` instead — it's
   more precise than a screenshot anyway.

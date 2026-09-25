@@ -58,6 +58,7 @@
       ],
       "run_at": "document_start",
       "all_frames": false,
+      "match_origin_as_fallback": true,
       "world": "MAIN"
     },
     {
@@ -84,7 +85,8 @@
         "omarchy-runtime.js"
       ],
       "run_at": "document_start",
-      "all_frames": false
+      "all_frames": false,
+      "match_origin_as_fallback": true
     },
     {
       "matches": [
@@ -94,7 +96,8 @@
         "content.js"
       ],
       "run_at": "document_start",
-      "all_frames": false
+      "all_frames": false,
+      "match_origin_as_fallback": true
     },
     {
       "matches": [

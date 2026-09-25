@@ -20,9 +20,27 @@ function applySlackTheme(theme, s) {
     fg, accent, dir, sidebarBg, chromeBg, railBg, navBg, sidebarFg, sidebarMuted,
     fgStrong, hoverBg, selectedBg, borderColor,
   } = s;
+  // Ink for copy sitting on an accent FILL. The theme family below puts real
+  // labels on the accent (a toggled-on huddle control, a themed badge), and
+  // theme.bg is not guaranteed legible there — inkOn() picks whichever of
+  // bg/fg clears 4.5:1 on this theme's accent, the same way hey.js does.
+  const onAccent = inkOn(accent, [theme.bg, fg]);
+  // Opaque lifted/inset surfaces for tokens Slack ships as solid literals.
+  // liftedBg is the low_solid rung of the SK ladder below (13% fg over bg);
+  // insetBg steps the page bg away from fg (darker on dark themes).
+  const liftedBg = mix(theme.bg, fg, 0.13);
+  const insetBg = shade(theme.bg, -dir * 0.04);
 
   const css = `
-    :root, html, body {
+    /* Also on every element carrying a Slack theme class, not just the root:
+       Slack scopes theme classes to subtrees too. The docked huddle bar is
+       .sk-client-theme--light-inverted-sidebar in light mode (and the live
+       huddle dialog carries it as well), and Slack's class rule redefines all
+       61 --dt_color-theme-* tokens on that element — an element-level
+       declaration beats anything the element would inherit from body, so the
+       bar's title came out Slack's white on a light theme. Declaring the same
+       block on the class element makes our !important values win there. */
+    :root, html, body, html body [class*="sk-client-theme--"] {
       --omarchy-bg: ${theme.bg};
       --omarchy-fg: ${fg};
       --omarchy-fg-strong: ${fgStrong};
@@ -143,6 +161,90 @@ function applySlackTheme(theme, s) {
          colors (icon fills, ink on brand buttons), and --dt_color-content-imp is
          the error red. Repointing literals inverts contrast — the same lesson the
          Outlook pack records for --white/--black. */
+
+      /* ===== dt_color-theme-* — the SIDEBAR-THEME family, real colors =====
+         A third dt_color family, 61 tokens, defined per color mode from Slack's
+         aubergine palette scale (--dt_color-plt-aubergine-0..100; in dark mode
+         0 is darkest, 100 lightest). It is the family the built-in sidebar
+         theme paints with, and it owns everything the pane rules do not: the
+         whole huddle chrome (toolbar buttons are surf-inv-pry, the toggled-on
+         mic/camera chip is base-pry with content-ter ink, the pop-out titlebar
+         is base-inv-pry), themed badges and banners (base-imp), the themed
+         button variants (c-button--themeInverse / --themeGhost), sidebar tabs
+         and the activity sidebar's selected row. Every one is consumed bare as
+         a color — hover/pressed variants too, via
+         background-image: linear-gradient(var(--x), var(--x)) — so real colors
+         here, never triplets.
+         Role map, read off the dark block: base-* are solid fills (base-pry is
+         the EMPHASIS fill — light lavender in dark mode — so it is the accent;
+         base-inv-pry is the darkest chrome), surf-* are translucent washes of
+         the ink (Slack composites aubergine-100 at .25/.08/.18 for rest /
+         hover / pressed; the same alphas of fg reproduce the lift on our flat
+         bg), content-* are ink where content-ter / content-imp /
+         content-inv-imp are specifically the ink ON an emphasis fill and so
+         take onAccent, and hgl-1 is Slack's selected-row highlight, which the
+         rest of the pack paints selectedBg with fg ink. */
+      --dt_color-theme-base-pry: ${accent} !important;
+      --dt_color-theme-base-pry-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-pry-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-base-sec: ${sidebarBg} !important;
+      --dt_color-theme-base-sec-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-sec-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-base-inv-pry: ${chromeBg} !important;
+      --dt_color-theme-base-inv-pry-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-inv-pry-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-base-inv-sec: ${liftedBg} !important;
+      --dt_color-theme-base-inv-sec-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-inv-sec-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-surf-pry: ${withAlpha(fg, 0.1)} !important;
+      --dt_color-theme-surf-pry-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-surf-pry-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-surf-sec: ${hoverBg} !important;
+      --dt_color-theme-surf-sec-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-surf-sec-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-surf-ter: ${withAlpha(theme.bg, 0.75)} !important;
+      --dt_color-theme-surf-ter-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-surf-ter-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-surf-inv-pry: ${withAlpha(fg, 0.2)} !important;
+      --dt_color-theme-surf-inv-pry-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-surf-inv-pry-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-surf-inv-sec: ${insetBg} !important;
+      --dt_color-theme-surf-inv-sec-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-surf-inv-sec-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-surf-inv-ter: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-surf-inv-ter-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-surf-inv-ter-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-content-pry: ${fgStrong} !important;
+      --dt_color-theme-content-sec: ${fg} !important;
+      --dt_color-theme-content-ter: ${onAccent} !important;
+      --dt_color-theme-content-inv-pry: ${fgStrong} !important;
+      --dt_color-theme-content-inv-sec: ${fg} !important;
+      --dt_color-theme-content-inv-ter: ${sidebarMuted} !important;
+      --dt_color-theme-otl-pry: ${borderColor} !important;
+      --dt_color-theme-otl-hgl-1: ${accent} !important;
+      --dt_color-theme-otl-inv-pry: ${borderColor} !important;
+      --dt_color-theme-base-inv-hgl-1: ${selectedBg} !important;
+      --dt_color-theme-base-inv-hgl-1-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-inv-hgl-1-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-base-hgl-1: ${selectedBg} !important;
+      --dt_color-theme-base-hgl-1-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-hgl-1-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-content-hgl-1: ${fgStrong} !important;
+      --dt_color-theme-base-hgl-2: ${accent} !important;
+      --dt_color-theme-base-hgl-2-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-hgl-2-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-base-inv-hgl-2: ${accent} !important;
+      --dt_color-theme-base-inv-hgl-2-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-inv-hgl-2-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-base-inv-imp: ${accent} !important;
+      --dt_color-theme-base-inv-imp-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-inv-imp-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-content-inv-imp: ${onAccent} !important;
+      --dt_color-theme-content-inv-imp-sec: ${withAlpha(onAccent, 0.8)} !important;
+      --dt_color-theme-base-imp: ${accent} !important;
+      --dt_color-theme-base-imp-hover: ${withAlpha(fg, 0.08)} !important;
+      --dt_color-theme-base-imp-pressed: ${withAlpha(fg, 0.18)} !important;
+      --dt_color-theme-content-imp: ${onAccent} !important;
       --saf-0: ${theme.bg} !important;
       --saf-1: ${sidebarBg} !important;
       --saf-2: ${railBg} !important;
@@ -330,19 +432,78 @@ function applySlackTheme(theme, s) {
        culprit; only a pixel sample does (rail #2c2525 focused, #38202a blurred).
        The gradient is an inline background-image, which our stylesheet
        !important still outranks. Paint the layer flat theme bg, and drop the
-       mask/filter so focus changes no longer alter it. The huddle mini-player
-       backdrop is left alone; it is scoped to its own tile. */
-    html body .p-theme_background:not(.p-theme_background--huddle-mini) {
+       mask/filter so focus changes no longer alter it.
+       The same class paints two more tiles, both without the --sunroof
+       modifier and with the gradient coming from a stylesheet rule instead
+       (radial + conic over aubergine-0/10): the huddle pop-out's whole window
+       backdrop, and the docked mini-player's .p-theme_background--huddle-mini.
+       Both go flat too — the user's choice for the huddle was to flatten, not
+       re-tint — so the rule no longer carves out the mini tile. */
+    html body .p-theme_background {
       background-color: var(--omarchy-bg) !important;
       background-image: none !important;
       mask: none !important;
       filter: none !important;
     }
 
+    /* ===== huddles ===== */
+    /* The huddle chrome itself — toolbar buttons, the toggled-on chip, the
+       pop-out titlebar, the thread pane — needs no selectors: it is painted
+       entirely from the --dt_color-theme-* family mapped in the token block,
+       plus the SK/dt_color tokens the rest of the pane already reads. Two
+       things are left that tokens cannot reach.
+       First, the video-tile backdrop is an IMAGE, img.p-huddle_background,
+       whose src is one of Slack's shipped gradient swirls
+       (/img/huddles/gradient_NN.png) by default. It is also a USER SETTING —
+       the huddle background menu offers artist photos and custom uploads — so
+       only Slack's own gradient assets are hidden; a background someone chose
+       is theirs and stays. The container behind it gets the theme bg so the
+       tile reads as the same flat surface as the chrome. Matched by src
+       substring, not by class: the class is identical for a chosen photo. */
+    html body img.p-huddle_background[src*="/img/huddles/gradient_"] {
+      visibility: hidden !important;
+    }
+    html body [class*="p-huddle_background__container"] {
+      background-color: var(--omarchy-bg) !important;
+    }
+
+    /* Second, two chrome buttons Slack paints as LITERAL white pills with
+       dark ink: the pop-out's "AI notes" pill (its base class paints from the
+       theme family like every other toolbar button, but the expanded-window
+       modifier overrides that with --dt_color-constants-white /
+       --dt_color-brand-core-black), and the compact pop-out's header buttons
+       (.p-huddle_compact_header .p-huddle_header__button — same pair, plus
+       --dt_color-brand-sec-inactive-gray on hover). Those tokens are never
+       remapped globally (icon fills, ink on brand buttons), so redefine them
+       on the buttons themselves, the tooltip precedent: their own
+       declarations then resolve to the themed wash and ink, and the glyphs
+       inherit the same redefinition without naming a hashed class. The
+       overlays that use the same white-on-video-tile treatment (active
+       speaker pill, pin pill, tile actions) are deliberately left alone: they
+       sit on video, where white-on-dark is legibility, not theme. */
+    html body [class*="toolbarWindowButton"],
+    html body [class*="p-huddle_compact_header"] [class*="p-huddle_header__button"] {
+      --dt_color-constants-white: var(--dt_color-theme-surf-inv-pry) !important;
+      --dt_color-brand-core-black: var(--dt_color-theme-content-inv-pry) !important;
+      --dt_color-brand-sec-inactive-gray: ${withAlpha(fg, 0.3)} !important;
+    }
+
+    /* The Huddles page (sidebar → Huddles) paints its canvas from
+       --dt_color-base-sec, one of the base- background tokens the token block
+       deliberately leaves to pane rules — so below its content it stayed
+       Slack's own dark grey. Stable p- page class, exact match like
+       .p-theme_background; the cards inside paint their own surfaces. */
+    html body .p-huddles_page {
+      background-color: var(--omarchy-bg) !important;
+    }
+
     /* Defensive: stop transparency leaking into dialog/menu chrome from our
        variable overrides. Just sets an opaque background — interior styling
-       is left to Slack's color mode (which we now auto-flip reliably). */
-    html body [role="dialog"]:not([aria-label="Huddle"]),
+       is left to Slack's color mode (which we now auto-flip reliably).
+       The live huddle dialog is exempt: it paints its own themed surface. Its
+       label is "Huddle" or "Huddle in <channel>" depending on the build, so
+       match the prefix — an exact match silently stopped exempting it. */
+    html body [role="dialog"]:not([aria-label^="Huddle"]),
     html body [role="menu"],
     html body [class*="ReactModal__Content"] {
       background-color: var(--omarchy-bg) !important;
@@ -1443,10 +1604,11 @@ function installHideStyle() {
   const s = document.createElement("style");
   s.id = AUTOMATION_HIDE_ID;
   // visibility only — pointer-events:none would block synthetic clicks reaching buttons.
-  // The live huddle is itself a [role="dialog"] (aria-label="Huddle"), so
-  // without the exemption a Color Mode flip blanks the call for the whole run.
+  // The live huddle is itself a [role="dialog"] (aria-label "Huddle" or
+  // "Huddle in <channel>", hence the prefix match), so without the exemption
+  // a Color Mode flip blanks the call for the whole run.
   s.textContent = `
-    [role="dialog"]:not([aria-label="Huddle"]),
+    [role="dialog"]:not([aria-label^="Huddle"]),
     [class*="ReactModal__Overlay"],
     [class*="c-modal"],
     [class*="modal_overlay"],
@@ -1857,6 +2019,18 @@ async function ensureSlackColorMode(targetIsDark) {
   // owns, so a pop-out has nothing to flip.
   if (!location.pathname.startsWith("/client")) {
     console.log("[omarchy] not the main client window; skipping", target, "flip");
+    return;
+  }
+  // The current pop-out passes that check: it is a window.open() child that
+  // was never navigated at all (its navigation entry is about:blank), which
+  // the opener's React renders into and whose URL it rewrites to /client/...
+  // with history.replaceState. The pack runs there only because the manifest
+  // opts into match_origin_as_fallback. The navigation entry is the one
+  // signal that cannot be rewritten after the fact, so gate on it rather
+  // than on the URL or on DOM that has not rendered yet at document_start.
+  const nav = performance.getEntriesByType("navigation")[0];
+  if (!nav || nav.name === "about:blank") {
+    console.log("[omarchy] child window (about:blank); skipping", target, "flip");
     return;
   }
 
