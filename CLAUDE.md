@@ -541,12 +541,14 @@ loads `client-boot-styles.*.css`, and at least some rules there differ from thei
 `modern.vendor` twins. Measured 2026-09-25: signed-out
 `.searchFilterSingleSelectButton__jvy8J:hover` is the literal `background:#ddd`,
 while the logged-in rule is `rgba(var(--sk_foreground_low_solid,221, 221, 221), 1)`
-— a token the pack already themes, with `#ddd` only as its *fallback*. A review
-done from the curl'd bundle alone (a static reviewer can't log in) will report
-"literal, needs an `!important` override" for rules the live app has already
-tokenized. Before acting on such a finding, confirm it in the live CSSOM (the
-`sheet.href` of the matching rule tells you which bundle it came from), or by
-measuring the computed colour on an element carrying the class.
+— a token the pack already themes, with `#ddd` only as its *fallback*. The
+disabled pill is the same shape: fill and border from that token, ink from
+`rgba(var(--sk_primary_foreground, …), .75)`. A review done from the curl'd
+bundle alone (a static reviewer can't log in) will report "literal, needs an
+`!important` override" for rules the live app has already tokenized. Treat
+that finding as a lead to check, not a fix to apply: confirm it in the live
+CSSOM (the `sheet.href` of the matching rule tells you which bundle it came
+from) or by measuring the computed colour on an element carrying the class.
 
 The **native host and install.sh**, unlike the CSS, *are* testable headlessly —
 do that rather than asking the user to click through a browser. Both honor
