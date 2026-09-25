@@ -63,36 +63,12 @@
     },
     {
       "matches": [
-        "*://app.slack.com/*",
-        "*://web.whatsapp.com/*",
-        "*://github.com/*",
-        "*://gist.github.com/*",
-        "*://linear.app/*",
-        "*://*.linear.app/*",
-        "*://discord.com/*",
-        "*://outlook.office.com/*",
-        "*://outlook.office365.com/*",
-        "*://outlook.live.com/*",
-        "*://outlook.cloud.microsoft/*",
-        "*://app.notion.com/*",
-        "*://www.notion.so/*",
-        "*://notion.so/*",
-        "*://app.hey.com/*"
+        "*://app.slack.com/*"
       ],
       "js": [
         "omarchy-colors.js",
         "omarchy-surfaces.js",
-        "omarchy-runtime.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": false,
-      "match_origin_as_fallback": true
-    },
-    {
-      "matches": [
-        "*://app.slack.com/*"
-      ],
-      "js": [
+        "omarchy-runtime.js",
         "content.js"
       ],
       "run_at": "document_start",
@@ -104,6 +80,9 @@
         "*://web.whatsapp.com/*"
       ],
       "js": [
+        "omarchy-colors.js",
+        "omarchy-surfaces.js",
+        "omarchy-runtime.js",
         "whatsapp.js"
       ],
       "run_at": "document_start",
@@ -115,6 +94,9 @@
         "*://gist.github.com/*"
       ],
       "js": [
+        "omarchy-colors.js",
+        "omarchy-surfaces.js",
+        "omarchy-runtime.js",
         "github.js"
       ],
       "run_at": "document_start",
@@ -126,6 +108,9 @@
         "*://*.linear.app/*"
       ],
       "js": [
+        "omarchy-colors.js",
+        "omarchy-surfaces.js",
+        "omarchy-runtime.js",
         "linear.js"
       ],
       "run_at": "document_start",
@@ -136,6 +121,9 @@
         "*://discord.com/*"
       ],
       "js": [
+        "omarchy-colors.js",
+        "omarchy-surfaces.js",
+        "omarchy-runtime.js",
         "discord.js"
       ],
       "run_at": "document_start",
@@ -149,6 +137,9 @@
         "*://outlook.cloud.microsoft/*"
       ],
       "js": [
+        "omarchy-colors.js",
+        "omarchy-surfaces.js",
+        "omarchy-runtime.js",
         "outlook.js"
       ],
       "run_at": "document_start",
@@ -161,6 +152,9 @@
         "*://notion.so/*"
       ],
       "js": [
+        "omarchy-colors.js",
+        "omarchy-surfaces.js",
+        "omarchy-runtime.js",
         "notion.js"
       ],
       "run_at": "document_start",
@@ -171,6 +165,9 @@
         "*://app.hey.com/*"
       ],
       "js": [
+        "omarchy-colors.js",
+        "omarchy-surfaces.js",
+        "omarchy-runtime.js",
         "hey.js"
       ],
       "run_at": "document_start",

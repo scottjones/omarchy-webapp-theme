@@ -25,8 +25,9 @@ script.
 
 - `extension/` — the unpacked extension
   - `omarchy-colors.js` / `omarchy-surfaces.js` / `omarchy-runtime.js` — the
-    app-agnostic engine (loaded before `content.js`, shares its scope): color
-    helpers (`relLuminance` linearizes channels per WCAG, `contrastRatio`,
+    app-agnostic engine (listed first in each pack's own content-script entry,
+    so it loads before the pack and shares its scope): color helpers
+    (`relLuminance` linearizes channels per WCAG, `contrastRatio`,
     `alphaForContrast`, `inkOn` for ink that rides on a saturated fill,
     `toTriplet` for triplet-valued design tokens),
     `deriveSurfaces()` (the theme→surfaces contract), and the `OmarchyTheme`
@@ -273,10 +274,19 @@ host manifest — a new site needs **no new keys and no native-messaging changes
    OWN css custom properties → derived surfaces (see `whatsapp.js`). Only
    escalate to `apply()` + observers + `onColorMode()` if the site fights back
    (see `content.js` — Slack is the worst case).
-2. In `manifest.json`: add the site's URL pattern to `host_permissions`, to the
-   two shared entries (shim + engine), and add a new content-script entry
-   loading just `<site>.js` for that pattern. Keep pack files flat in
-   `extension/` — the AUR PKGBUILD installs with a flat `extension/*` glob.
+2. In `manifest.json`: add the site's URL pattern to `host_permissions` and to
+   the shared MAIN-world shim entry, and add a new content-script entry for that
+   pattern whose `js` is **the three engine files followed by `<site>.js`**
+   (`omarchy-colors.js`, `omarchy-surfaces.js`, `omarchy-runtime.js`,
+   `<site>.js`). Never move the engine back into an entry of its own: Chromium
+   guarantees script order only *within* one `content_scripts` entry, not across
+   entries. Chromium 153 (Brave Origin 153 too) was measured injecting the pack
+   entry *before* a separate engine entry on every reload, so the pack's
+   `OmarchyTheme.register()` threw `ReferenceError: OmarchyTheme is not defined`
+   and nothing was themed — while the same manifest had worked in an earlier
+   browser session, so the order isn't even stable. Pack URL patterns must stay
+   disjoint, or two entries would inject the engine twice. Keep pack files flat
+   in `extension/` — the AUR PKGBUILD installs with a flat `extension/*` glob.
 3. Add the site's row to `SITES` in `extension/options.js` (the per-site
    enable/disable toggle; the `id` must match the register call — the engine
    gates on `chrome.storage.sync` `disabledSites[id]` and pends the theme until
