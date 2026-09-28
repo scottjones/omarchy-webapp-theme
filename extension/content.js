@@ -1545,7 +1545,6 @@ activeRowsObserver.observe(document.body || document.documentElement, {
 
 const AUTOMATION_HIDE_ID = "omarchy-automation-hide";
 let automating = false;
-let lastAppliedMode = null; // "Light" | "Dark" | null
 
 // Color-mode flip deferred because the tab was hidden — see armVisibilityRetry.
 let pendingColorMode = null; // boolean targetIsDark, or null
@@ -1702,6 +1701,25 @@ function findPrefsDialog() {
     document.querySelector('[role="dialog"][aria-label="Preferences"]') ||
     document.querySelector('.p-prefs_dialog, [class*="p-prefs_dialog"]')
   );
+}
+
+// Does Slack already render the target Color Mode? Two independent signals,
+// both measured to flip in the same tick as the Appearance radio: the body
+// class (dark is `sk-client-theme--dark`; LIGHT IS THE ABSENCE of a theme
+// class, matching Slack's CSS where light tokens sit on `:root`), and Slack's
+// own persisted cache, localStorage "slack-client-theme" = "dark" | "light",
+// which its boot script reads before the app shell paints. Require both: on a
+// fresh profile the key is missing and the class arrives only once the server
+// pref loads, so the body's "no class" would read as light while Slack is
+// about to go dark. A missing key or any disagreement returns false and the
+// caller opens Preferences as before. The value set is closed: the color-mode
+// radio group is exactly light/dark on current builds (no sync option), so
+// there is no third value to misread.
+function slackRendersColorMode(targetIsDark) {
+  let stored = null;
+  try { stored = localStorage.getItem("slack-client-theme"); } catch (_) {}
+  if (stored !== (targetIsDark ? "dark" : "light")) return false;
+  return document.body.classList.contains("sk-client-theme--dark") === targetIsDark;
 }
 
 function logDialogDetails(prefix) {
@@ -2138,10 +2156,9 @@ async function ensureSlackColorMode(targetIsDark) {
   };
   document.addEventListener("visibilitychange", noteHidden);
 
-  // No cache check. The "Dark already selected" / "Light already selected"
-  // detection inside clickColorModeButton (via `boxContainerSelected` class)
-  // is the real source of truth — checking it requires opening prefs, but
-  // that's cheap and avoids us getting out of sync with Slack.
+  // The "already selected" detection inside clickColorModeButton (via
+  // boxContainerSelected) stays the source of truth for the FLIP; the check
+  // below only decides whether opening Preferences is needed at all.
 
   try {
 
@@ -2166,6 +2183,27 @@ async function ensureSlackColorMode(targetIsDark) {
     }
     // One more beat after Slack mounts — handlers attach slightly after DOM appears.
     await sleep(500);
+
+    // Skip the round-trip when Slack already renders the target mode. Every
+    // load used to open Preferences (hide style, workspace menu or Ctrl+,,
+    // Appearance tab, read the radio, close) only to log "Dark already
+    // selected" — measured at 3.3s of hidden-modal automation per load and
+    // 1.5s per no-op crossing, and it has to run while the window is FOCUSED
+    // (blurred, the synthetic Ctrl+, lands nowhere and the flip silently
+    // fails). Slack exposes its Color Mode in two places that flip in the
+    // same tick as the radio click: body.sk-client-theme--dark (light is the
+    // CSS default and carries NO class), and localStorage
+    // "slack-client-theme", Slack's own persisted "dark" | "light", which its
+    // boot script applies at ~0.5s — long before the readiness wait above.
+    // Both must agree with the target: body alone is ambiguous on a fresh
+    // profile, where the key does not exist yet and the class only lands once
+    // the app has loaded the server pref. Any disagreement, or a missing key,
+    // runs the full flow exactly as before.
+    if (slackRendersColorMode(targetIsDark)) {
+      console.log("[omarchy] Slack already", target, "; skipping Preferences");
+      succeeded = true;
+      return;
+    }
 
     console.log("[omarchy] flipping Slack to", target);
     installHideStyle();
@@ -2197,8 +2235,6 @@ async function ensureSlackColorMode(targetIsDark) {
         return;
       }
 
-      lastAppliedMode = target;
-      chrome.storage.local.set({ lastSlackMode: target });
       succeeded = true;
       console.log("[omarchy] Slack color mode now", target);
     } finally {

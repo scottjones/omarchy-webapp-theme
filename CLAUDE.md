@@ -400,6 +400,18 @@ removes the need entirely. Consequences to preserve when editing:
    spend seconds firing synthetic clicks into it. The hide style it installs
    exempts the live huddle's `[aria-label^="Huddle"]` dialog (prefix: the label
    is "Huddle in <channel>" on current builds).
+   **It opens Preferences only on a real mismatch.** `slackRendersColorMode()`
+   reads two signals that flip in the same tick as the radio: the body class
+   (`sk-client-theme--dark`; **light is the absence of a theme class**, matching
+   Slack's CSS where light tokens sit on `:root`) and Slack's own persisted
+   cache `localStorage["slack-client-theme"]` = `"dark"|"light"`, which its
+   boot script applies at ~0.5s. Both must agree with the target — on a fresh
+   profile the key is missing and the class only lands once the server pref
+   loads, so body alone would misread "no class" as light. Measured before:
+   every load ran 3.3s of hidden-modal automation to log "already selected";
+   after: skipped at ~2.5s with no hide style and no modal. The full flow must
+   run with the window **focused** — blurred, the synthetic Ctrl+, lands
+   nowhere and the flip silently fails — another reason not to run it idly.
 8. **Huddles** need almost no selectors — the chrome paints from the theme
    family above. What's left: the `.p-theme_background` backdrop (pop-out
    window, mini tile) goes flat with the sunroof rule; the video-tile backdrop is
