@@ -73,8 +73,16 @@ function scheduleReconnect() {
 }
 
 function broadcast(theme) {
-  chrome.tabs.query({ url: MATCH_PATTERNS }, (tabs) => {
-    console.log("[omarchy] broadcasting theme to", tabs.length, "themed tab(s)");
+  // Every tab, not tabs.query({ url: MATCH_PATTERNS }). Slack's huddle pop-out
+  // is a window.open() child whose committed navigation is about:blank (the
+  // page rewrites location with replaceState, which the tabs API never sees),
+  // so a URL-filtered query left it out and a theme change repainted the main
+  // window while the live call stayed on the old theme. The pack IS injected
+  // there via match_origin_as_fallback, so a plain sendMessage reaches it.
+  // Tabs with no receiver reject, which the catch absorbs; one message per
+  // tab per theme change is nothing.
+  chrome.tabs.query({}, (tabs) => {
+    console.log("[omarchy] broadcasting theme to", tabs.length, "tab(s)");
     for (const t of tabs) {
       chrome.tabs.sendMessage(t.id, { type: "omarchy-theme", theme }).catch(() => {});
     }

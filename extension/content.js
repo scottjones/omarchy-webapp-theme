@@ -453,14 +453,17 @@ function applySlackTheme(theme, s) {
        plus the SK/dt_color tokens the rest of the pane already reads. Two
        things are left that tokens cannot reach.
        First, the video-tile backdrop is an IMAGE, img.p-huddle_background,
-       whose src is one of Slack's shipped gradient swirls
-       (/img/huddles/gradient_NN.png) by default. It is also a USER SETTING —
-       the huddle background menu offers artist photos and custom uploads — so
-       only Slack's own gradient assets are hidden; a background someone chose
-       is theirs and stays. The container behind it gets the theme bg so the
-       tile reads as the same flat surface as the chrome. Matched by src
-       substring, not by class: the class is identical for a chosen photo. */
-    html body img.p-huddle_background[src*="/img/huddles/gradient_"] {
+       drawn from Slack's stock library under /img/huddles/ — the gradient
+       swirls (gradient_NN.png) AND the commissioned artist scenes
+       (LuisMendo-Garden_Office.jpg, …). Slack picks one per huddle, so
+       matching only the gradients left an artist scene through on the next
+       call. The background is also a USER SETTING — the huddle background
+       menu offers custom uploads — so the whole stock directory is hidden and
+       nothing else: an upload comes from another origin and is theirs. The
+       container behind it gets the theme bg so the tile reads as the same
+       flat surface as the chrome. Matched by src substring, not by class:
+       the class is identical for an upload. */
+    html body img.p-huddle_background[src*="/img/huddles/"] {
       visibility: hidden !important;
     }
     html body [class*="p-huddle_background__container"] {
@@ -486,6 +489,24 @@ function applySlackTheme(theme, s) {
       --dt_color-constants-white: var(--dt_color-theme-surf-inv-pry) !important;
       --dt_color-brand-core-black: var(--dt_color-theme-content-inv-pry) !important;
       --dt_color-brand-sec-inactive-gray: ${withAlpha(fg, 0.3)} !important;
+    }
+
+    /* Third, the name pill on every video tile. Slack paints it
+       .p-huddle_peer_tile__name_overlay { background: --dt_color-base-inv-pry;
+       color: --dt_color-content-inv-pry } — a near-black pill on the video
+       with light ink. The token block maps content-inv-pry to theme.bg, which
+       is right everywhere that fill IS the accent or the fg (a primary
+       button, a highlighted row) and wrong here: base-inv-pry is left
+       unmapped, so the pill stays Slack's near-black while its ink went dark
+       with the theme — an empty grey pill on every tile on a dark theme. The
+       pill is a white-on-video overlay like the active-speaker one, so its
+       ink is legibility, not theme: hand it Slack's own light ink back,
+       locally, from the plt primitive Slack's dark block derives it from
+       (gray-100, a triplet, hence the rgb() wrapper). Same for the mic
+       overlay, which shares the declaration. The dark PILL is untouched. */
+    html body [class*="p-huddle_peer_tile__name_overlay"],
+    html body [class*="p-huddle_peer_tile__mic_overlay"] {
+      --dt_color-content-inv-pry: rgb(var(--dt_color-plt-gray-100)) !important;
     }
 
     /* The Huddles page (sidebar → Huddles) paints its canvas from

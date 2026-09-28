@@ -218,9 +218,14 @@ script.
     accent. The distance scan is explicit because `highlightColor()` avoids only
     ONE colour and kept handing back the colour already used for `negative`.
   - `background.js` — MV3 service worker. Holds the native-messaging port,
-    rebroadcasts pushed themes to matched tabs (the site list is derived from
-    the manifest's content-script matches — adding a pack never touches this
-    file), answers `request-fresh-theme`.
+    rebroadcasts pushed themes to **every tab** (not a URL-filtered
+    `tabs.query`: Slack's huddle pop-out is an `about:blank` child whose
+    `replaceState`'d URL the tabs API never sees, so a filtered query skipped
+    it and a theme change left the live call on the old theme; receiver-less
+    tabs just reject), answers `request-fresh-theme`. The `onUpdated` re-push
+    still filters by host (derived from the manifest's content-script matches —
+    adding a pack never touches this file); a fresh pop-out gets its theme via
+    `request-theme` at load instead.
   - `inject-prefers-color-scheme.js` — runs in the page's MAIN world at
     `document_start`; a near-complete `matchMedia('(prefers-color-scheme)')`
     polyfill so Slack's "Sync with OS" appearance follows omarchy, plus the
@@ -403,13 +408,18 @@ removes the need entirely. Consequences to preserve when editing:
 8. **Huddles** need almost no selectors — the chrome paints from the theme
    family above. What's left: the `.p-theme_background` backdrop (pop-out
    window, mini tile) goes flat with the sunroof rule; the video-tile backdrop is
-   an `<img>` of Slack's `/img/huddles/gradient_NN.png`, hidden by **src
-   substring** because the same class carries a user-chosen artist photo, which
-   stays; and two chrome buttons Slack paints as literal white pills
-   (`constants-white` / `brand-core-black`) get those tokens redefined on the
-   button itself, the tooltip precedent. Overlays that are white-on-video
-   (active-speaker pill, pin pill, tile actions) are left alone: legibility, not
-   theme. Slack's "Leave" red and the in-huddle green stay semantic.
+   an `<img>` from Slack's stock library under `/img/huddles/` — gradient swirls
+   *and* artist scenes, one picked per huddle — hidden by **src substring** on
+   the directory, so a custom upload (another origin) stays; and two chrome
+   buttons Slack paints as literal white pills (`constants-white` /
+   `brand-core-black`) get those tokens redefined on the button itself, the
+   tooltip precedent. The per-tile **name pill** is the inverse case: it reads
+   `content-inv-pry` for ink on an *unmapped* `base-inv-pry` near-black pill, so
+   the global `content-inv-pry → bg` mapping made it dark-on-dark; the pill gets
+   Slack's own light ink back locally (`rgb(var(--dt_color-plt-gray-100))`).
+   Other white-on-video overlays (active-speaker pill, pin pill, tile actions)
+   are left alone: legibility, not theme. Slack's "Leave" red and the in-huddle
+   green stay semantic.
 
 ## How the CSS rules are written (important conventions)
 
